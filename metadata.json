@@ -1,0 +1,5 @@
+{
+  "name": "TeamFlow 4.0",
+  "description": "Nowoczesne narzędzie do zarządzania projektami. Zbudowane na .NET 9 i React 19, z ciemnym motywem glassmorphism.",
+  "requestFramePermissions": []
+}
