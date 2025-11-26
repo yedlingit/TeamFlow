@@ -107,6 +107,13 @@ export const taskService = {
   },
 
   /**
+   * Create comment (alias for addComment)
+   */
+  async createComment(taskId: number, data: { content: string }): Promise<any> {
+    return this.addComment(taskId, data.content);
+  },
+
+  /**
    * Delete comment
    */
   async deleteComment(commentId: number): Promise<void> {

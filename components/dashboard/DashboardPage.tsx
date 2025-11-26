@@ -12,14 +12,14 @@ import {
   ArrowRight,
   FileText,
   Loader2,
-  Download
 } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { cn } from '../../lib/utils';
 import { dashboardService, authService } from '../../api';
 import { useLoading } from '../../hooks/useLoading';
 import { useApiError } from '../../hooks/useApiError';
-import type { DashboardStatsDto } from '../../api/types';
+import type { DashboardStatsDto, UserDto } from '../../api/types';
+import jsPDF from 'jspdf';
 
 // Helper to get styles based on theme key
 const getProjectStyles = (theme: string) => {
@@ -62,7 +62,7 @@ const DashboardPage: React.FC = () => {
   const handleApiError = useApiError();
   const [isGenerating, setIsGenerating] = useState(false);
   const [stats, setStats] = useState<DashboardStatsDto | null>(null);
-  const [currentUser, setCurrentUser] = useState<{ firstName: string | null } | null>(null);
+  const [currentUser, setCurrentUser] = useState<UserDto | null>(null);
   const currentDate = new Date().toLocaleDateString('pl-PL', { weekday: 'long', day: 'numeric', month: 'long' });
 
   useEffect(() => {
@@ -92,18 +92,83 @@ const DashboardPage: React.FC = () => {
   };
 
   const handleGenerateReport = () => {
+    if (!stats) return;
     setIsGenerating(true);
-    // Simulate generation delay
     setTimeout(() => {
-      setIsGenerating(false);
-      // Simulate download logic
-      const element = document.createElement("a");
-      const file = new Blob([`RAPORT TYGODNIOWY - TEAMFLOW\n\nData: ${new Date().toLocaleString()}\nAutor: Jan Kowalski\n\nStatystyki:\n- Do zrobienia: 12\n- W toku: 4\n- Ukończone: 28\n`], {type: 'text/plain'});
-      element.href = URL.createObjectURL(file);
-      element.download = "raport_tygodniowy.txt";
-      document.body.appendChild(element); // Required for this to work in FireFox
-      element.click();
-    }, 2000);
+      try {
+        const doc = new jsPDF();
+        const now = new Date();
+        const dateLabel = now.toLocaleString('pl-PL');
+        const currentUserLabel = currentUser 
+          ? `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() || currentUser.email 
+          : 'Nieznany użytkownik';
+        
+        doc.setFontSize(18);
+        doc.text('Raport aktywności TeamFlow', 15, 20);
+        
+        doc.setFontSize(11);
+        doc.text(`Data: ${dateLabel}`, 15, 30);
+        doc.text(`Użytkownik: ${currentUserLabel}`, 15, 38);
+        
+        doc.setFontSize(14);
+        doc.text('Podsumowanie zadań', 15, 52);
+        doc.setFontSize(11);
+        const statsLines = [
+          `Do zrobienia: ${stats.taskStats.toDo}`,
+          `W toku: ${stats.taskStats.inProgress}`,
+          `Ukończone: ${stats.taskStats.done}`,
+          `Łącznie: ${stats.taskStats.total}`,
+        ];
+        statsLines.forEach((line, index) => {
+          doc.text(`• ${line}`, 20, 62 + index * 8);
+        });
+        
+        let cursorY = 62 + statsLines.length * 8 + 12;
+        
+        if (stats.activeProjects && stats.activeProjects.length > 0) {
+          doc.setFontSize(14);
+          doc.text('Aktywne projekty', 15, cursorY);
+          cursorY += 8;
+          doc.setFontSize(11);
+          
+          stats.activeProjects.slice(0, 5).forEach(project => {
+            if (cursorY > 270) {
+              doc.addPage();
+              cursorY = 20;
+            }
+            doc.text(`• ${project.name} — ${project.progress}% postępu, ${project.taskCount} zadań`, 20, cursorY);
+            cursorY += 7;
+          });
+        }
+        
+        if (stats.upcomingTasks && stats.upcomingTasks.length > 0) {
+          if (cursorY > 260) {
+            doc.addPage();
+            cursorY = 20;
+          }
+          doc.setFontSize(14);
+          doc.text('Najbliższe zadania', 15, cursorY);
+          cursorY += 8;
+          doc.setFontSize(11);
+          
+          stats.upcomingTasks.slice(0, 5).forEach(task => {
+            if (cursorY > 270) {
+              doc.addPage();
+              cursorY = 20;
+            }
+            const due = task.dueDate 
+              ? new Date(task.dueDate).toLocaleDateString('pl-PL', { day: 'numeric', month: 'short', year: 'numeric' })
+              : 'Brak terminu';
+            doc.text(`• ${task.title} (${task.projectName || 'Brak projektu'}) — termin: ${due}`, 20, cursorY);
+            cursorY += 7;
+          });
+        }
+        
+        doc.save(`teamflow-raport-${now.toISOString().split('T')[0]}.pdf`);
+      } finally {
+        setIsGenerating(false);
+      }
+    }, 800);
   };
 
   return (
@@ -117,7 +182,7 @@ const DashboardPage: React.FC = () => {
         </div>
         <Button 
           onClick={handleGenerateReport} 
-          disabled={isGenerating}
+          disabled={isGenerating || !stats}
           className="bg-zinc-800 text-zinc-300 hover:text-white hover:bg-zinc-700 border border-zinc-700/50"
         >
           {isGenerating ? (

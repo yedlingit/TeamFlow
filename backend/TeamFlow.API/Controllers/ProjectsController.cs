@@ -58,13 +58,19 @@ namespace TeamFlow.API.Controllers
 
             var organizationId = user.OrganizationId.Value;
 
-            // Pobierz projekty, do których użytkownik należy
+            // Administratorzy widzą wszystkie projekty w organizacji
+            // Pozostali użytkownicy widzą tylko projekty, do których należą
             var query = _context.Projects
                 .Include(p => p.Organization)
                 .Include(p => p.UserProjects)
                 .Include(p => p.Tasks)
-                .Where(p => p.OrganizationId == organizationId &&
-                           p.UserProjects.Any(up => up.UserId == userId));
+                .Where(p => p.OrganizationId == organizationId);
+
+            // Jeśli użytkownik nie jest Administratorem, filtruj tylko projekty, do których należy
+            if (user.Role != UserRole.Administrator)
+            {
+                query = query.Where(p => p.UserProjects.Any(up => up.UserId == userId));
+            }
 
             // Filtrowanie po statusie
             if (!string.IsNullOrEmpty(status))
@@ -99,17 +105,29 @@ namespace TeamFlow.API.Controllers
             };
 
             // Paginacja
-            var totalCount = await query.CountAsync();
-            var projects = await query
-                .AsNoTracking()
+            // Najpierw pobierz tylko ID projektów (bez duplikatów z JOIN-ów)
+            var projectIds = await query
+                .Select(p => p.Id)
+                .Distinct()
                 .Skip((page - 1) * pageSize)
                 .Take(pageSize)
+                .ToListAsync();
+
+            var totalCount = await query.Select(p => p.Id).Distinct().CountAsync();
+
+            // Teraz pobierz pełne projekty z wszystkimi danymi
+            var projects = await _context.Projects
+                .AsNoTracking()
+                .Include(p => p.Organization)
+                .Include(p => p.UserProjects)
+                .Include(p => p.Tasks)
+                .Where(p => projectIds.Contains(p.Id))
                 .ToListAsync();
 
             var projectDtos = new List<ProjectDto>();
             foreach (var project in projects)
             {
-                projectDtos.Add(await MapToProjectDtoAsync(project, userId));
+                projectDtos.Add(await MapToProjectDtoAsync(project, userId, includeMembers: true));
             }
 
             var result = new TeamFlow.API.DTOs.Common.PagedResultDto<ProjectDto>
@@ -157,8 +175,9 @@ namespace TeamFlow.API.Controllers
                 return Forbid();
             }
 
-            // Sprawdź czy użytkownik należy do projektu
-            if (!project.UserProjects.Any(up => up.UserId == userId))
+            // Administratorzy mogą zobaczyć wszystkie projekty w organizacji
+            // Pozostali użytkownicy muszą należeć do projektu
+            if (user.Role != UserRole.Administrator && !project.UserProjects.Any(up => up.UserId == userId))
             {
                 return Forbid();
             }
@@ -190,6 +209,12 @@ namespace TeamFlow.API.Controllers
             if (user == null || !user.OrganizationId.HasValue)
             {
                 return BadRequest(new { error = "Użytkownik nie należy do żadnej organizacji" });
+            }
+
+            // Sprawdź czy użytkownik ma uprawnienia do tworzenia projektów (tylko TeamLeader i Administrator)
+            if (user.Role != UserRole.TeamLeader && user.Role != UserRole.Administrator)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { error = "Tylko liderzy projektów i administratorzy mogą tworzyć projekty" });
             }
 
             var organizationId = user.OrganizationId.Value;
@@ -309,8 +334,21 @@ namespace TeamFlow.API.Controllers
                 return NotFound(new { error = "Projekt nie został znaleziony" });
             }
 
-            // Sprawdź czy użytkownik należy do projektu
-            if (!project.UserProjects.Any(up => up.UserId == userId))
+            // Sprawdź czy użytkownik należy do organizacji projektu
+            var user = await _userManager.FindByIdAsync(userId);
+            if (user == null || !user.OrganizationId.HasValue || user.OrganizationId.Value != project.OrganizationId)
+            {
+                return Forbid();
+            }
+
+            // Administratorzy mogą edytować wszystkie projekty w organizacji
+            // Project Manager (TeamLeaderId) może edytować swój projekt
+            // Pozostali użytkownicy muszą należeć do projektu
+            var isProjectManager = !string.IsNullOrEmpty(project.TeamLeaderId) && project.TeamLeaderId == userId;
+            var isAdministrator = user.Role == UserRole.Administrator;
+            var isProjectMember = project.UserProjects.Any(up => up.UserId == userId);
+            
+            if (!isAdministrator && !isProjectManager && !isProjectMember)
             {
                 return Forbid();
             }
@@ -486,10 +524,22 @@ namespace TeamFlow.API.Controllers
                 return NotFound(new { error = "Projekt nie został znaleziony" });
             }
 
-            // Sprawdź czy użytkownik należy do projektu
-            if (!project.UserProjects.Any(up => up.UserId == userId))
+            // Sprawdź czy użytkownik należy do organizacji projektu
+            var user = await _userManager.FindByIdAsync(userId);
+            if (user == null || !user.OrganizationId.HasValue || user.OrganizationId.Value != project.OrganizationId)
             {
                 return Forbid();
+            }
+
+            // Administratorzy mogą zarządzać wszystkimi projektami w organizacji
+            // Project Manager (TeamLeaderId) może zarządzać swoim projektem
+            // Memberzy NIE mogą zarządzać członkami projektu
+            var isProjectManager = !string.IsNullOrEmpty(project.TeamLeaderId) && project.TeamLeaderId == userId;
+            var isAdministrator = user.Role == UserRole.Administrator;
+            
+            if (!isAdministrator && !isProjectManager)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { error = "Tylko administratorzy i Project Managerzy mogą zarządzać członkami projektu" });
             }
 
             // Sprawdź czy użytkownik do dodania należy do organizacji
@@ -543,10 +593,22 @@ namespace TeamFlow.API.Controllers
                 return NotFound(new { error = "Projekt nie został znaleziony" });
             }
 
-            // Sprawdź czy użytkownik należy do projektu
-            if (!project.UserProjects.Any(up => up.UserId == userId))
+            // Sprawdź czy użytkownik należy do organizacji projektu
+            var user = await _userManager.FindByIdAsync(userId);
+            if (user == null || !user.OrganizationId.HasValue || user.OrganizationId.Value != project.OrganizationId)
             {
                 return Forbid();
+            }
+
+            // Administratorzy mogą zarządzać wszystkimi projektami w organizacji
+            // Project Manager (TeamLeaderId) może zarządzać swoim projektem
+            // Memberzy NIE mogą zarządzać członkami projektu
+            var isProjectManager = !string.IsNullOrEmpty(project.TeamLeaderId) && project.TeamLeaderId == userId;
+            var isAdministrator = user.Role == UserRole.Administrator;
+            
+            if (!isAdministrator && !isProjectManager)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { error = "Tylko administratorzy i Project Managerzy mogą zarządzać członkami projektu" });
             }
 
             // Nie można usunąć twórcy projektu

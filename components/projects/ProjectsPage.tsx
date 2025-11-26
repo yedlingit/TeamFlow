@@ -6,22 +6,13 @@ import { Plus, Folder, Clock, MoreHorizontal, Edit, Trash2, X, Save, AlertCircle
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { cn } from '../../lib/utils';
-import { projectService, authService } from '../../api';
+import { projectService, authService, userService } from '../../api';
 import { useLoading } from '../../hooks/useLoading';
 import { useApiError } from '../../hooks/useApiError';
 import { useToast } from '../../contexts/ToastContext';
-import type { ProjectDto, UserDto } from '../../api/types';
+import type { ProjectDto, UserDto, UserListDto } from '../../api/types';
 
-// MOCK DATA - Organization Members
-const organizationMembers = [
-  { id: 'u1', initials: 'JK', name: 'Jan Kowalski', role: 'Frontend Dev' },
-  { id: 'u2', initials: 'AW', name: 'Anna Wiśniewska', role: 'Product Owner' },
-  { id: 'u3', initials: 'MB', name: 'Marek Nowak', role: 'Backend Dev' },
-  { id: 'u4', initials: 'PD', name: 'Piotr Dąbrowski', role: 'DevOps' },
-  { id: 'u5', initials: 'KS', name: 'Katarzyna Szymańska', role: 'QA Engineer' },
-  { id: 'u6', initials: 'TS', name: 'Tomasz Szymański', role: 'Mobile Dev' },
-  { id: 'u7', initials: 'DO', name: 'Dorota Olszewska', role: 'UX Designer' },
-];
+// Mock data removed - using API now
 
 // Mock data removed - using API now
 
@@ -92,6 +83,8 @@ const ProjectCard: React.FC<ProjectCardProps> = ({ project, isMenuOpen, onMenuTo
     <motion.div
       layout
       variants={itemVariants}
+      initial="hidden"
+      animate="visible"
       exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
       className={cn("relative", isMenuOpen && "z-40")}
       onMouseEnter={() => setIsHovered(true)}
@@ -149,7 +142,10 @@ const ProjectCard: React.FC<ProjectCardProps> = ({ project, isMenuOpen, onMenuTo
                 {project.members && project.members.length > 0 ? (
                   project.members.map((member, i) => {
                     const isLeader = member.userId === project.teamLeaderId;
-                    const initials = member.initials || member.email[0].toUpperCase();
+                    const initials = member.initials || 
+                      `${member.firstName?.[0] || ''}${member.lastName?.[0] || ''}`.toUpperCase() || 
+                      member.email?.[0]?.toUpperCase() || '?';
+                    const fullName = `${member.firstName || ''} ${member.lastName || ''}`.trim() || member.email || 'Nieznany';
                     return (
                       <div 
                         key={member.userId} 
@@ -159,7 +155,7 @@ const ProjectCard: React.FC<ProjectCardProps> = ({ project, isMenuOpen, onMenuTo
                               ? "bg-zinc-800 border-amber-500 border-2 shadow-[0_0_8px_rgba(245,158,11,0.3)]" 
                               : "bg-zinc-700 border border-zinc-600"
                         )}
-                        title={isLeader ? `Lider: ${member.firstName} ${member.lastName}` : `${member.firstName} ${member.lastName}`}
+                        title={isLeader ? `Project Manager: ${fullName}` : fullName}
                       >
                         {initials}
                       </div>
@@ -217,15 +213,30 @@ const ProjectsPage = () => {
   
   // Edit/Create Modal State
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  const [editingProject, setEditingProject] = useState<Partial<ProjectDto> | null>(null);
+  const [editingProject, setEditingProject] = useState<Partial<ProjectDto> & { memberIds?: string[] } | null>(null);
   const [isLeaderOpen, setIsLeaderOpen] = useState(false);
   const [formErrors, setFormErrors] = useState<{name?: string}>({});
+  const [organizationMembers, setOrganizationMembers] = useState<UserListDto[]>([]);
 
-  // Load current user and projects
+  // Load current user, projects, and organization members
   useEffect(() => {
     loadCurrentUser();
     loadProjects();
+    loadOrganizationMembers();
   }, [filter, searchQuery, page]);
+
+  const loadOrganizationMembers = async () => {
+    try {
+      const result = await userService.getUsers({
+        page: 1,
+        pageSize: 100,
+      });
+      setOrganizationMembers(result.items);
+    } catch (err) {
+      // Silent fail
+      console.error('Failed to load organization members:', err);
+    }
+  };
 
   const loadCurrentUser = async () => {
     try {
@@ -258,7 +269,11 @@ const ProjectsPage = () => {
   };
 
   const filteredProjects = useMemo(() => {
-    return projects; // Already filtered by API
+    // Remove duplicates based on project ID (in case API returns duplicates)
+    const uniqueProjects = projects.filter((project, index, self) => 
+      index === self.findIndex((p) => p.id === project.id)
+    );
+    return uniqueProjects;
   }, [projects]);
 
   const filters = [
@@ -327,33 +342,66 @@ const ProjectsPage = () => {
       startLoading();
       try {
         if (editingProject.id === 0 || !editingProject.id) {
-          // Create New Project
-          await projectService.create({
+          // Create New Project - send memberIds directly in the create request
+          const newProject = await projectService.create({
             name: editingProject.name!,
             description: editingProject.description || undefined,
             theme: editingProject.theme || undefined,
             dueDate: editingProject.dueDate || undefined,
             teamLeaderId: editingProject.teamLeaderId || undefined,
+            memberIds: editingProject.memberIds && editingProject.memberIds.length > 0 
+              ? editingProject.memberIds 
+              : undefined,
           });
+          
           success('Projekt został utworzony');
+          
+          // Small delay to ensure database is updated
+          await new Promise(resolve => setTimeout(resolve, 300));
         } else {
           // Update Existing Project
-          await projectService.update(editingProject.id, {
+          // Prepare update data - ensure dueDate is in correct format
+          const updateData: any = {
             name: editingProject.name,
-            description: editingProject.description,
+            description: editingProject.description || undefined,
             status: editingProject.status,
-            theme: editingProject.theme,
-            dueDate: editingProject.dueDate,
-            teamLeaderId: editingProject.teamLeaderId,
-          });
+            theme: editingProject.theme || undefined,
+            teamLeaderId: editingProject.teamLeaderId || undefined,
+            memberIds: editingProject.memberIds && editingProject.memberIds.length > 0 
+              ? editingProject.memberIds 
+              : undefined, // Send memberIds to update project members
+          };
+          
+          // Format dueDate properly (backend expects ISO string or null)
+          if (editingProject.dueDate) {
+            // If it's already in YYYY-MM-DD format, convert to ISO string
+            const dateStr = editingProject.dueDate;
+            if (dateStr.includes('T')) {
+              updateData.dueDate = dateStr;
+            } else {
+              // Convert YYYY-MM-DD to ISO string
+              updateData.dueDate = new Date(dateStr + 'T00:00:00').toISOString();
+            }
+          } else {
+            updateData.dueDate = undefined;
+          }
+          
+          await projectService.update(editingProject.id, updateData);
+          
           success('Projekt został zaktualizowany');
+          
+          // Small delay to ensure database is updated
+          await new Promise(resolve => setTimeout(resolve, 300));
         }
         
         setIsEditModalOpen(false);
         setEditingProject(null);
         setIsLeaderOpen(false);
         setFormErrors({});
-        loadProjects(); // Reload projects
+        
+        // Reload projects - ensure we're loading active projects
+        // Force reload by resetting page to 1 if needed
+        await loadProjects();
       } catch (err) {
         handleApiError(err, 'Nie udało się zapisać projektu');
       } finally {
@@ -361,24 +409,24 @@ const ProjectsPage = () => {
       }
   };
 
-  const toggleTeamMember = (initials: string) => {
+  const toggleTeamMember = (userId: string) => {
     if (!editingProject) return;
     
-    const currentTeam = editingProject.team || [];
-    let newTeam;
-    let newLeader = editingProject.teamLeader;
+    const currentMemberIds = editingProject.memberIds || [];
+    let newMemberIds: string[];
+    let newLeaderId = editingProject.teamLeaderId;
 
-    if (currentTeam.includes(initials)) {
+    if (currentMemberIds.includes(userId)) {
         // Remove user
-        newTeam = currentTeam.filter((i: string) => i !== initials);
+        newMemberIds = currentMemberIds.filter((id: string) => id !== userId);
         // If leader is removed, clear leader
-        if (newLeader === initials) newLeader = null;
+        if (newLeaderId === userId) newLeaderId = undefined;
     } else {
         // Add user
-        newTeam = [...currentTeam, initials];
+        newMemberIds = [...currentMemberIds, userId];
     }
     
-    setEditingProject({ ...editingProject, team: newTeam, teamLeader: newLeader });
+    setEditingProject({ ...editingProject, memberIds: newMemberIds, teamLeaderId: newLeaderId });
   };
 
   const handleCreateProject = () => {
@@ -389,7 +437,8 @@ const ProjectsPage = () => {
           description: '',
           status: 'Active',
           dueDate: new Date(Date.now() + 12096e5).toISOString().split('T')[0], // Default 14 days from now
-          theme: 'white'
+          theme: 'white',
+          memberIds: [] // Initialize empty member list
       });
       setFormErrors({});
       setIsEditModalOpen(true);
@@ -464,7 +513,7 @@ const ProjectsPage = () => {
                 onMenuToggle={(e) => handleMenuToggle(e, project.id)}
                 onEdit={(e) => handleEdit(e, project.id)}
                 onDelete={(e) => handleDelete(e, project.id)}
-                canEdit={canCreateProjects}
+                canEdit={canCreateProjects || project.teamLeaderId === currentUser?.userId}
                 />
             ))
           ) : (
@@ -516,6 +565,11 @@ const ProjectsPage = () => {
                         onClick={(e) => e.stopPropagation()}
                         className="w-full max-w-lg bg-[#0A0A0A] border border-zinc-800 rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
                     >
+                        {organizationMembers.length === 0 && (
+                            <div className="p-4 bg-yellow-500/10 border-b border-yellow-500/20 text-yellow-400 text-sm">
+                                Ładowanie członków organizacji...
+                            </div>
+                        )}
                         <div className="p-6 border-b border-zinc-800 flex justify-between items-center shrink-0">
                             <h2 className="text-xl font-bold text-white">
                                 {editingProject.id === 0 ? "Nowy Projekt" : "Edytuj Projekt"}
@@ -565,19 +619,35 @@ const ProjectsPage = () => {
                                 </div>
                                 <div className="space-y-1.5">
                                     <label className="text-xs font-medium text-zinc-400 ml-1 flex items-center gap-1">
-                                        <Palette className="w-3 h-3" /> Motyw
+                                        <Palette className="w-3 h-3" /> Kolor Motywu
                                     </label>
-                                    <select
-                                        value={editingProject.theme}
-                                        onChange={(e) => setEditingProject({...editingProject, theme: e.target.value})}
-                                        className="flex w-full rounded-xl border border-zinc-800 bg-[#111] px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-white/20 focus:border-white/50 appearance-none"
-                                    >
-                                        <option value="white">Biały</option>
-                                        <option value="blue">Niebieski</option>
-                                        <option value="indigo">Indygo</option>
-                                        <option value="purple">Fioletowy</option>
-                                        <option value="zinc">Szary</option>
-                                    </select>
+                                    <div className="flex gap-2">
+                                        {[
+                                            { value: 'white', label: 'Biały', color: 'bg-white' },
+                                            { value: 'blue', label: 'Niebieski', color: 'bg-blue-500' },
+                                            { value: 'indigo', label: 'Indygo', color: 'bg-indigo-500' },
+                                            { value: 'purple', label: 'Fioletowy', color: 'bg-purple-500' },
+                                            { value: 'zinc', label: 'Szary', color: 'bg-zinc-500' }
+                                        ].map(themeOption => (
+                                            <button
+                                                key={themeOption.value}
+                                                type="button"
+                                                onClick={() => setEditingProject({...editingProject, theme: themeOption.value})}
+                                                className={cn(
+                                                    "w-8 h-8 rounded-full border-2 flex items-center justify-center transition-all",
+                                                    themeOption.color,
+                                                    editingProject.theme === themeOption.value 
+                                                        ? "ring-2 ring-offset-2 ring-offset-[#0A0A0A] ring-white" 
+                                                        : "ring-transparent"
+                                                )}
+                                                title={themeOption.label}
+                                            >
+                                                {editingProject.theme === themeOption.value && (
+                                                    <Check className="w-4 h-4 text-black" />
+                                                )}
+                                            </button>
+                                        ))}
+                                    </div>
                                 </div>
                             </div>
 
@@ -586,12 +656,14 @@ const ProjectsPage = () => {
                                 <div className="bg-[#111] border border-zinc-800 rounded-xl p-3 max-h-48 overflow-y-auto">
                                     <div className="space-y-1">
                                         {organizationMembers.map(member => {
-                                            const isSelected = editingProject.team.includes(member.initials);
+                                            const isSelected = editingProject.memberIds?.includes(member.userId) || false;
+                                            const initials = member.initials || `${member.firstName?.[0] || ''}${member.lastName?.[0] || ''}`.toUpperCase() || member.email[0].toUpperCase();
+                                            const fullName = `${member.firstName || ''} ${member.lastName || ''}`.trim() || member.email;
                                             return (
                                                 <button
-                                                    key={member.id}
+                                                    key={member.userId}
                                                     type="button"
-                                                    onClick={() => toggleTeamMember(member.initials)}
+                                                    onClick={() => toggleTeamMember(member.userId)}
                                                     className={cn(
                                                         "w-full flex items-center justify-between p-2 rounded-lg transition-colors",
                                                         isSelected ? "bg-zinc-800" : "hover:bg-zinc-900"
@@ -605,8 +677,8 @@ const ProjectsPage = () => {
                                                             {member.initials}
                                                         </div>
                                                         <div className="text-left">
-                                                            <div className={cn("text-sm font-medium", isSelected ? "text-white" : "text-zinc-400")}>{member.name}</div>
-                                                            <div className="text-[10px] text-zinc-600">{member.role}</div>
+                                                            <div className={cn("text-sm font-medium", isSelected ? "text-white" : "text-zinc-400")}>{fullName}</div>
+                                                            <div className="text-[10px] text-zinc-600">{member.email}</div>
                                                         </div>
                                                     </div>
                                                     {isSelected && <Check className="w-4 h-4 text-white" />}
@@ -618,21 +690,30 @@ const ProjectsPage = () => {
                             </div>
 
                             <div className="space-y-1.5 relative">
-                                <label className="text-xs font-medium text-zinc-400 ml-1">Team Leader</label>
+                                <label className="text-xs font-medium text-zinc-400 ml-1">Project Manager</label>
                                 <button
                                     type="button"
                                     onClick={() => setIsLeaderOpen(!isLeaderOpen)}
                                     className="w-full bg-[#111] border border-zinc-800 rounded-xl px-3 py-2.5 flex items-center justify-between hover:border-zinc-700 transition-colors"
                                 >
-                                    {editingProject.teamLeader ? (
+                                    {editingProject.teamLeaderId ? (
                                         <div className="flex items-center gap-2">
                                             <Crown className="w-4 h-4 text-amber-500" />
-                                            <div className="w-5 h-5 rounded-full bg-zinc-800 flex items-center justify-center text-[10px] font-bold text-zinc-300 border border-zinc-700">
-                                                {editingProject.teamLeader}
-                                            </div>
-                                            <span className="text-sm text-white font-medium">
-                                                {organizationMembers.find(m => m.initials === editingProject.teamLeader)?.name}
-                                            </span>
+                                            {(() => {
+                                              const leader = organizationMembers.find(m => m.userId === editingProject.teamLeaderId);
+                                              const leaderInitials = leader?.initials || `${leader?.firstName?.[0] || ''}${leader?.lastName?.[0] || ''}`.toUpperCase() || leader?.email[0].toUpperCase() || '?';
+                                              const leaderName = leader ? `${leader.firstName || ''} ${leader.lastName || ''}`.trim() || leader.email : 'Nieznany';
+                                              return (
+                                                <>
+                                                  <div className="w-5 h-5 rounded-full bg-zinc-800 flex items-center justify-center text-[10px] font-bold text-zinc-300 border border-zinc-700">
+                                                    {leaderInitials}
+                                                  </div>
+                                                  <span className="text-sm text-white font-medium">
+                                                    {leaderName}
+                                                  </span>
+                                                </>
+                                              );
+                                            })()}
                                         </div>
                                     ) : (
                                         <span className="text-sm text-zinc-500">Wybierz lidera...</span>
@@ -648,33 +729,37 @@ const ProjectsPage = () => {
                                             exit={{ opacity: 0, y: 5 }}
                                             className="absolute top-full left-0 right-0 mt-2 bg-[#111] border border-zinc-800 rounded-xl shadow-xl z-50 max-h-48 overflow-y-auto p-1"
                                         >
-                                            {editingProject.team.length > 0 ? (
+                                            {editingProject.memberIds && editingProject.memberIds.length > 0 ? (
                                                 organizationMembers
-                                                    .filter(m => editingProject.team.includes(m.initials))
-                                                    .map(member => (
+                                                    .filter(m => editingProject.memberIds?.includes(m.userId))
+                                                    .map(member => {
+                                                      const initials = member.initials || `${member.firstName?.[0] || ''}${member.lastName?.[0] || ''}`.toUpperCase() || member.email[0].toUpperCase();
+                                                      const fullName = `${member.firstName || ''} ${member.lastName || ''}`.trim() || member.email;
+                                                      return (
                                                         <button
-                                                            key={member.id}
+                                                            key={member.userId}
                                                             type="button"
                                                             onClick={() => {
-                                                                setEditingProject({ ...editingProject, teamLeader: member.initials });
+                                                                setEditingProject({ ...editingProject, teamLeaderId: member.userId });
                                                                 setIsLeaderOpen(false);
                                                             }}
                                                             className={cn(
                                                                 "w-full flex items-center justify-between p-2 rounded-lg transition-colors text-left mb-0.5",
-                                                                editingProject.teamLeader === member.initials ? "bg-zinc-800" : "hover:bg-zinc-900"
+                                                                editingProject.teamLeaderId === member.userId ? "bg-zinc-800" : "hover:bg-zinc-900"
                                                             )}
                                                         >
                                                             <div className="flex items-center gap-3">
                                                                 <div className="w-7 h-7 rounded-full bg-zinc-800 flex items-center justify-center text-xs font-bold text-zinc-300 border border-zinc-700">
-                                                                    {member.initials}
+                                                                    {initials}
                                                                 </div>
-                                                                <span className={cn("text-sm", editingProject.teamLeader === member.initials ? "text-white font-medium" : "text-zinc-400")}>
-                                                                    {member.name}
+                                                                <span className={cn("text-sm", editingProject.teamLeaderId === member.userId ? "text-white font-medium" : "text-zinc-400")}>
+                                                                    {fullName}
                                                                 </span>
                                                             </div>
-                                                            {editingProject.teamLeader === member.initials && <Check className="w-4 h-4 text-amber-500" />}
+                                                            {editingProject.teamLeaderId === member.userId && <Check className="w-4 h-4 text-amber-500" />}
                                                         </button>
-                                                    ))
+                                                      );
+                                                    })
                                             ) : (
                                                 <div className="p-3 text-center text-xs text-zinc-500 italic">
                                                     Najpierw dodaj członków zespołu do projektu.

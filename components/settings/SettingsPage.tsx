@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
@@ -14,6 +14,11 @@ import {
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { cn } from '../../lib/utils';
+import { authService, userService } from '../../api';
+import { useLoading } from '../../hooks/useLoading';
+import { useApiError } from '../../hooks/useApiError';
+import { useToast } from '../../contexts/ToastContext';
+import type { UserDto } from '../../api/types';
 
 // --- Components ---
 
@@ -27,18 +32,50 @@ const SectionHeader = ({ title, description }: { title: string, description: str
 // --- SECTIONS ---
 
 const ProfileSection = () => {
-  const [isLoading, setIsLoading] = useState(false);
+  const { isLoading, startLoading, stopLoading } = useLoading();
+  const handleApiError = useApiError();
+  const { success } = useToast();
+  const [user, setUser] = useState<UserDto | null>(null);
   const [formData, setFormData] = useState({
-    firstName: "Jan",
-    lastName: "Kowalski",
-    email: "jan@teamflow.com"
+    firstName: '',
+    lastName: '',
+    email: ''
   });
 
+  useEffect(() => {
+    loadUser();
+  }, []);
+
+  const loadUser = async () => {
+    try {
+      const userData = await authService.getMe();
+      setUser(userData);
+      setFormData({
+        firstName: userData.firstName || '',
+        lastName: userData.lastName || '',
+        email: userData.email || ''
+      });
+    } catch (err) {
+      handleApiError(err, 'Nie udało się załadować danych użytkownika');
+    }
+  };
+
   const handleSave = async () => {
-    setIsLoading(true);
-    // Symulacja zapisu
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    setIsLoading(false);
+    if (!user) return;
+    startLoading();
+    try {
+      await userService.updateProfile({
+        firstName: formData.firstName,
+        lastName: formData.lastName
+      });
+      // Reload user data
+      await loadUser();
+      success('Profil został zaktualizowany');
+    } catch (err) {
+      handleApiError(err, 'Nie udało się zaktualizować profilu');
+    } finally {
+      stopLoading();
+    }
   };
 
   return (
@@ -53,10 +90,14 @@ const ProfileSection = () => {
       {/* Avatar Display Only */}
       <div className="flex items-center gap-6 p-4 bg-zinc-900/30 border border-zinc-800 rounded-2xl">
         <div className="w-16 h-16 rounded-full bg-zinc-800 flex items-center justify-center text-xl font-bold text-white border-2 border-zinc-700">
-          {formData.firstName[0]}{formData.lastName[0]}
+          {(formData.firstName?.[0] || '').toUpperCase()}{(formData.lastName?.[0] || '').toUpperCase() || (formData.email?.[0] || 'U').toUpperCase()}
         </div>
         <div className="space-y-1">
-          <h3 className="text-sm font-medium text-white">{formData.firstName} {formData.lastName}</h3>
+          <h3 className="text-sm font-medium text-white">
+            {formData.firstName && formData.lastName 
+              ? `${formData.firstName} ${formData.lastName}` 
+              : formData.firstName || formData.lastName || formData.email || 'Użytkownik'}
+          </h3>
           <p className="text-xs text-zinc-500">Awatar jest generowany automatycznie na podstawie inicjałów.</p>
         </div>
       </div>
@@ -110,7 +151,9 @@ const ProfileSection = () => {
 };
 
 const SecuritySection = () => {
-  const [isLoading, setIsLoading] = useState(false);
+  const { isLoading, startLoading, stopLoading } = useLoading();
+  const handleApiError = useApiError();
+  const { success } = useToast();
   const [passwords, setPasswords] = useState({
     current: '',
     new: '',
@@ -118,11 +161,29 @@ const SecuritySection = () => {
   });
 
   const handleUpdatePassword = async () => {
-    setIsLoading(true);
-    // Symulacja API
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    setPasswords({ current: '', new: '', confirm: '' });
-    setIsLoading(false);
+    if (passwords.new !== passwords.confirm) {
+      handleApiError(new Error('Hasła nie są identyczne'), 'Hasła nie są identyczne');
+      return;
+    }
+    
+    if (passwords.new.length < 6) {
+      handleApiError(new Error('Hasło musi mieć co najmniej 6 znaków'), 'Hasło musi mieć co najmniej 6 znaków');
+      return;
+    }
+
+    startLoading();
+    try {
+      await userService.changePassword({
+        currentPassword: passwords.current,
+        newPassword: passwords.new
+      });
+      setPasswords({ current: '', new: '', confirm: '' });
+      success('Hasło zostało zaktualizowane');
+    } catch (err) {
+      handleApiError(err, 'Nie udało się zaktualizować hasła');
+    } finally {
+      stopLoading();
+    }
   };
 
   return (
@@ -199,9 +260,14 @@ const SettingsPage = () => {
     { id: 'security', label: 'Bezpieczeństwo', icon: Shield },
   ];
 
-  const handleLogout = () => {
-    // In a real app, clear tokens/session here
-    navigate('/login');
+  const handleLogout = async () => {
+    try {
+      await authService.logout();
+      navigate('/login');
+    } catch (err) {
+      // Even if logout fails, redirect to login
+      navigate('/login');
+    }
   };
 
   const renderContent = () => {

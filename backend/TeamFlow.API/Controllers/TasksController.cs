@@ -225,7 +225,13 @@ namespace TeamFlow.API.Controllers
                 return Unauthorized(new { error = "Użytkownik nie jest zalogowany" });
             }
 
-            // Sprawdź czy projekt istnieje i użytkownik należy do niego
+            var user = await _userManager.FindByIdAsync(userId);
+            if (user == null)
+            {
+                return Unauthorized(new { error = "Użytkownik nie został znaleziony" });
+            }
+
+            // Sprawdź czy projekt istnieje
             var project = await _context.Projects
                 .Include(p => p.UserProjects)
                 .FirstOrDefaultAsync(p => p.Id == dto.ProjectId);
@@ -235,9 +241,19 @@ namespace TeamFlow.API.Controllers
                 return NotFound(new { error = "Projekt nie został znaleziony" });
             }
 
-            if (!project.UserProjects.Any(up => up.UserId == userId))
+            // Sprawdź uprawnienia do tworzenia zadań:
+            // - Administratorzy mogą tworzyć zadania we wszystkich projektach w organizacji
+            // - Project Manager (TeamLeaderId) może tworzyć zadania w swoim projekcie
+            // - TeamLeader (rola organizacyjna) może tworzyć zadania w projektach, do których należy
+            // - Memberzy NIE mogą tworzyć zadań
+            var isProjectManager = !string.IsNullOrEmpty(project.TeamLeaderId) && project.TeamLeaderId == userId;
+            var isAdministrator = user.Role == UserRole.Administrator;
+            var isTeamLeader = user.Role == UserRole.TeamLeader;
+            var isProjectMember = project.UserProjects.Any(up => up.UserId == userId);
+
+            if (!isAdministrator && !isProjectManager && !(isTeamLeader && isProjectMember))
             {
-                return Forbid();
+                return StatusCode(StatusCodes.Status403Forbidden, new { error = "Nie masz uprawnień do tworzenia zadań w tym projekcie" });
             }
 
             // Utwórz zadanie
@@ -305,9 +321,16 @@ namespace TeamFlow.API.Controllers
                 return Unauthorized(new { error = "Użytkownik nie jest zalogowany" });
             }
 
+            var user = await _userManager.FindByIdAsync(userId);
+            if (user == null)
+            {
+                return Unauthorized(new { error = "Użytkownik nie został znaleziony" });
+            }
+
             var task = await _context.Tasks
                 .Include(t => t.Project)
                     .ThenInclude(p => p.UserProjects)
+                .Include(t => t.TaskAssignments)
                 .FirstOrDefaultAsync(t => t.Id == id);
 
             if (task == null)
@@ -320,6 +343,21 @@ namespace TeamFlow.API.Controllers
             {
                 return Forbid();
             }
+
+            // Sprawdź uprawnienia do edycji zadania
+            // Administratorzy mogą edytować wszystkie zadania w organizacji
+            // Project Manager (TeamLeaderId) może edytować wszystkie zadania w swoim projekcie
+            // TeamLeader (rola organizacyjna) może edytować wszystkie zadania w projektach, do których należy
+            // Memberzy NIE mogą edytować zadań (tylko zmiana statusu)
+            var isProjectManager = !string.IsNullOrEmpty(task.Project.TeamLeaderId) && task.Project.TeamLeaderId == userId;
+            var isAdministrator = user.Role == UserRole.Administrator;
+            var isTeamLeader = user.Role == UserRole.TeamLeader;
+
+            if (user.Role == UserRole.Member)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { error = "Memberzy nie mogą edytować zadań. Możesz tylko zmieniać status swoich zadań." });
+            }
+            // Project Manager, Administrator i TeamLeader mogą edytować wszystkie zadania w projekcie
 
             // Aktualizuj pola
             if (!string.IsNullOrEmpty(dto.Title))
@@ -378,9 +416,16 @@ namespace TeamFlow.API.Controllers
                 return Unauthorized(new { error = "Użytkownik nie jest zalogowany" });
             }
 
+            var user = await _userManager.FindByIdAsync(userId);
+            if (user == null)
+            {
+                return Unauthorized(new { error = "Użytkownik nie został znaleziony" });
+            }
+
             var task = await _context.Tasks
                 .Include(t => t.Project)
                     .ThenInclude(p => p.UserProjects)
+                .Include(t => t.TaskAssignments)
                 .FirstOrDefaultAsync(t => t.Id == id);
 
             if (task == null)
@@ -393,6 +438,25 @@ namespace TeamFlow.API.Controllers
             {
                 return Forbid();
             }
+
+            // Sprawdź uprawnienia do zmiany statusu zadania
+            // Administratorzy mogą zmieniać status wszystkich zadań w organizacji
+            // Project Manager (TeamLeaderId) może zmieniać status wszystkich zadań w swoim projekcie
+            // TeamLeader (rola organizacyjna) może zmieniać status wszystkich zadań w projektach, do których należy
+            // Memberzy mogą zmieniać status tylko zadań, do których są przypisani
+            var isProjectManager = !string.IsNullOrEmpty(task.Project.TeamLeaderId) && task.Project.TeamLeaderId == userId;
+            var isAdministrator = user.Role == UserRole.Administrator;
+            var isTeamLeader = user.Role == UserRole.TeamLeader;
+            var isAssignedToTask = task.TaskAssignments.Any(ta => ta.UserId == userId);
+
+            if (user.Role == UserRole.Member)
+            {
+                if (!isAssignedToTask)
+                {
+                    return StatusCode(StatusCodes.Status403Forbidden, new { error = "Możesz zmieniać status tylko swoich zadań" });
+                }
+            }
+            // Project Manager, Administrator i TeamLeader mogą zmieniać status wszystkich zadań w projekcie
 
             task.Status = dto.Status;
             task.UpdatedAt = DateTime.UtcNow;
@@ -742,13 +806,12 @@ namespace TeamFlow.API.Controllers
                 return NotFound(new { error = "Zadanie nie zostało znalezione" });
             }
 
-            // Sprawdź czy użytkownik jest autorem komentarza lub należy do projektu
+            // Sprawdź czy użytkownik jest autorem komentarza
+            // Tylko autor może usuwać swoje komentarze
             var isAuthor = comment.AuthorId == userId;
-            var belongsToProject = task.Project.UserProjects.Any(up => up.UserId == userId);
-
-            if (!isAuthor && !belongsToProject)
+            if (!isAuthor)
             {
-                return Forbid();
+                return StatusCode(StatusCodes.Status403Forbidden, new { error = "Możesz usuwać tylko swoje komentarze" });
             }
 
             _context.Comments.Remove(comment);

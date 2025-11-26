@@ -15,7 +15,8 @@ import {
   Filter,
   Copy,
   Check,
-  Key
+  Key,
+  Users
 } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
@@ -38,6 +39,10 @@ const initialUsers = [
 ];
 
 const roles = {
+  Administrator: { label: 'Administrator', color: 'text-red-400 bg-red-400/10 border-red-400/20' },
+  TeamLeader: { label: 'Team Leader', color: 'text-purple-400 bg-purple-400/10 border-purple-400/20' },
+  Member: { label: 'Pracownik', color: 'text-blue-400 bg-blue-400/10 border-blue-400/20' },
+  // Legacy support
   admin: { label: 'Administrator', color: 'text-red-400 bg-red-400/10 border-red-400/20' },
   manager: { label: 'Manager', color: 'text-purple-400 bg-purple-400/10 border-purple-400/20' },
   user: { label: 'Pracownik', color: 'text-blue-400 bg-blue-400/10 border-blue-400/20' }
@@ -77,9 +82,17 @@ const UsersPage = () => {
   const loadCurrentUser = async () => {
     try {
       const user = await authService.getMe();
-      setCurrentUser(user);
+      // Ensure role is mapped correctly
+      const mappedUser = {
+        ...user,
+        role: typeof user.role === 'number' 
+          ? (user.role === 0 ? 'Member' : user.role === 1 ? 'TeamLeader' : 'Administrator')
+          : user.role
+      };
+      setCurrentUser(mappedUser);
     } catch (err) {
       // Silent fail
+      console.error('Failed to load current user:', err);
     }
   };
 
@@ -92,15 +105,26 @@ const UsersPage = () => {
         page: 1,
         pageSize: 100,
       });
-      setUsers(result.items);
-    } catch (err) {
+      // Ensure all roles are mapped correctly
+      const mappedUsers = result.items.map(user => ({
+        ...user,
+        role: typeof user.role === 'number' 
+          ? (user.role === 0 ? 'Member' : user.role === 1 ? 'TeamLeader' : 'Administrator')
+          : user.role
+      }));
+      setUsers(mappedUsers);
+    } catch (err: any) {
       // If 403 Forbidden, user doesn't have access - redirect handled by ProtectedUsersPage
       // If other error, show message
-      if (err instanceof Error && err.message.includes('403')) {
+      if (err?.status === 403) {
         // Access denied - will be redirected by ProtectedUsersPage
+        console.warn('Access denied to users page');
         return;
       }
+      console.error('Error loading users:', err);
       handleApiError(err, 'Nie udało się załadować użytkowników');
+      // Set empty array on error to prevent black screen
+      setUsers([]);
     } finally {
       stopLoading();
     }
@@ -266,8 +290,18 @@ const UsersPage = () => {
       </div>
 
       {/* Users Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        <AnimatePresence>
+      {isLoading ? (
+        <div className="flex items-center justify-center py-12">
+          <div className="text-zinc-500 text-sm">Ładowanie użytkowników...</div>
+        </div>
+      ) : filteredUsers.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-12 text-center">
+          <Users className="w-12 h-12 text-zinc-700 mb-4" />
+          <p className="text-zinc-500 text-sm">Brak użytkowników do wyświetlenia</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <AnimatePresence>
             {filteredUsers.map((user) => (
             <motion.div
                 key={user.userId}
@@ -341,17 +375,18 @@ const UsersPage = () => {
                      <div className="flex items-center justify-between">
                         <div className={cn(
                             "px-2.5 py-1 rounded-md text-xs font-medium border flex items-center gap-1.5",
-                            roles[user.role as keyof typeof roles].color
+                            roles[user.role as keyof typeof roles]?.color || roles.Member.color
                         )}>
                             <Shield className="w-3 h-3" />
-                            {roles[user.role as keyof typeof roles].label}
+                            {roles[user.role as keyof typeof roles]?.label || 'Pracownik'}
                         </div>
                      </div>
                 </div>
             </motion.div>
             ))}
-        </AnimatePresence>
-      </div>
+          </AnimatePresence>
+        </div>
+      )}
 
       {/* Add/Edit Modal */}
       <AnimatePresence>
