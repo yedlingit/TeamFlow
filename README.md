@@ -319,6 +319,13 @@ Po pierwszym uruchomieniu możesz:
 3. Zaprosić innych użytkowników używając kodu
 4. Utworzyć projekty i zadania
 
+Lub zalogowac sie do gotowych kont
+1. admin@acme.com
+2. manager1@acme.com
+3. manager2@acme.com
+4. dev1@acme.com - dev8@acme.com
+   Wszyscy mają hasło: Password123!
+
 ## API Endpoints
 
 ### Autoryzacja
