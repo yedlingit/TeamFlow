@@ -12,7 +12,7 @@ namespace TeamFlow.Infrastructure.Data
         public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
             : base(options) { }
 
-        // DbSets
+        // Zbiory danych
         public DbSet<Organization> Organizations { get; set; } = null!;
         public DbSet<Project> Projects { get; set; } = null!;
         public DbSet<UserProject> UserProjects { get; set; } = null!;
@@ -24,42 +24,42 @@ namespace TeamFlow.Infrastructure.Data
         {
             base.OnModelCreating(modelBuilder);
 
-            // Composite PKs
+            // Klucze złożone
             modelBuilder.Entity<UserProject>()
                 .HasKey(up => new { up.UserId, up.ProjectId });
 
             modelBuilder.Entity<TaskAssignment>()
                 .HasKey(ta => new { ta.TaskId, ta.UserId });
 
-            // Organization → Users (one‑to‑many)
+            // Organizacja → Użytkownicy (jeden do wielu)
             modelBuilder.Entity<ApplicationUser>()
                 .HasOne(u => u.Organization)
                 .WithMany()
                 .HasForeignKey(u => u.OrganizationId)
                 .OnDelete(DeleteBehavior.Restrict);
 
-            // Organization → Projects (one‑to‑many)
+            // Organizacja → Projekty (jeden do wielu)
             modelBuilder.Entity<Project>()
                 .HasOne(p => p.Organization)
                 .WithMany(o => o.Projects)
                 .HasForeignKey(p => p.OrganizationId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            // Project → TeamLeader (optional)
+            // Projekt → Lider zespołu (opcjonalny)
             modelBuilder.Entity<Project>()
                 .HasOne<ApplicationUser>()
                 .WithMany()
                 .HasForeignKey(p => p.TeamLeaderId)
                 .OnDelete(DeleteBehavior.SetNull);
 
-            // Project → Tasks (one‑to‑many)
+            // Projekt → Zadania (jeden do wielu)
             modelBuilder.Entity<TaskEntity>()
                 .HasOne(t => t.Project)
                 .WithMany(p => p.Tasks)
                 .HasForeignKey(t => t.ProjectId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            // Task ↔ User (many‑to‑many) – via TaskAssignment
+            // Zadanie ↔ Użytkownik (wiele do wielu) – przez TaskAssignment
             modelBuilder.Entity<TaskAssignment>()
                 .HasOne(ta => ta.Task)
                 .WithMany(t => t.TaskAssignments)
@@ -72,14 +72,14 @@ namespace TeamFlow.Infrastructure.Data
                 .HasForeignKey(ta => ta.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            // Comment → Task (many‑to‑one)
+            // Komentarz → Zadanie (wiele do jednego)
             modelBuilder.Entity<Comment>()
                 .HasOne<TaskEntity>()
                 .WithMany(t => t.Comments)
                 .HasForeignKey(c => c.TaskId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            // Comment → Author (User)
+            // Komentarz → Autor (Użytkownik)
             modelBuilder.Entity<Comment>()
                 .HasOne<ApplicationUser>()
                 .WithMany()
@@ -92,7 +92,7 @@ namespace TeamFlow.Infrastructure.Data
                 .IsUnique();
 
             // Indeksy dla wydajności
-            // Projects
+            // Projekty
             modelBuilder.Entity<Project>()
                 .HasIndex(p => p.OrganizationId);
             modelBuilder.Entity<Project>()
@@ -100,7 +100,7 @@ namespace TeamFlow.Infrastructure.Data
             modelBuilder.Entity<Project>()
                 .HasIndex(p => p.TeamLeaderId);
 
-            // Tasks
+            // Zadania
             modelBuilder.Entity<TaskEntity>()
                 .HasIndex(t => t.ProjectId);
             modelBuilder.Entity<TaskEntity>()
@@ -110,25 +110,25 @@ namespace TeamFlow.Infrastructure.Data
             modelBuilder.Entity<TaskEntity>()
                 .HasIndex(t => t.DueDate);
 
-            // UserProjects
+            // Użytkownicy projektu
             modelBuilder.Entity<UserProject>()
                 .HasIndex(up => up.UserId);
             modelBuilder.Entity<UserProject>()
                 .HasIndex(up => up.ProjectId);
 
-            // TaskAssignments
+            // Przypisania zadań
             modelBuilder.Entity<TaskAssignment>()
                 .HasIndex(ta => ta.UserId);
             modelBuilder.Entity<TaskAssignment>()
                 .HasIndex(ta => ta.TaskId);
 
-            // Comments
+            // Komentarze
             modelBuilder.Entity<Comment>()
                 .HasIndex(c => c.TaskId);
             modelBuilder.Entity<Comment>()
                 .HasIndex(c => c.AuthorId);
 
-            // Users (ApplicationUser)
+            // Użytkownicy (ApplicationUser)
             modelBuilder.Entity<ApplicationUser>()
                 .HasIndex(u => u.OrganizationId);
             modelBuilder.Entity<ApplicationUser>()

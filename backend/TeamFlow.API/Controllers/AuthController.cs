@@ -76,7 +76,7 @@ namespace TeamFlow.API.Controllers
             {
                 UserId = user.Id,
                 Email = user.Email,
-                Message = "Registration successful"
+                Message = "Rejestracja zakończona pomyślnie"
             });
         }
 

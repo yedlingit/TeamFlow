@@ -4,7 +4,6 @@ namespace TeamFlow.API.DTOs.Auth
     {
         public string UserId { get; set; } = string.Empty;
         public string Email { get; set; } = string.Empty;
-        public string Message { get; set; } = "Registration successful";
+        public string Message { get; set; } = "Rejestracja zakończona pomyślnie";
     }
 }
-

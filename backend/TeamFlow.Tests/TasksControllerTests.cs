@@ -25,20 +25,20 @@ namespace TeamFlow.Tests
 
         public TasksControllerTests()
         {
-            // Setup InMemory DB
+            // Konfiguracja bazy danych InMemory
             var options = new DbContextOptionsBuilder<ApplicationDbContext>()
                 .UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString())
                 .Options;
             _context = new ApplicationDbContext(options);
 
-            // Setup UserManager Mock
+            // Konfiguracja mocka UserManager
             var store = new Mock<IUserStore<ApplicationUser>>();
             _userManagerMock = new Mock<UserManager<ApplicationUser>>(store.Object, null, null, null, null, null, null, null, null);
 
-            // Setup Logger Mock
+            // Konfiguracja mocka Logger
             _loggerMock = new Mock<ILogger<TasksController>>();
 
-            // Initialize Controller
+            // Inicjalizacja kontrolera
             _controller = new TasksController(_context, _userManagerMock.Object, _loggerMock.Object);
         }
 
@@ -56,7 +56,7 @@ namespace TeamFlow.Tests
             _userManagerMock.Setup(x => x.GetUserId(It.IsAny<ClaimsPrincipal>())).Returns(userId);
             _userManagerMock.Setup(x => x.FindByIdAsync(userId)).ReturnsAsync(user);
             
-            // Mock Controller Context
+            // Mockowanie kontekstu kontrolera
             var claims = new List<Claim>
             {
                 new Claim(ClaimTypes.NameIdentifier, userId),
@@ -74,7 +74,7 @@ namespace TeamFlow.Tests
         [Fact]
         public async System.Threading.Tasks.Task CreateTask_ReturnsCreated_WhenDataIsValid()
         {
-            // Arrange
+            // Przygotowanie
             var userId = "user1";
             var projectId = 1;
             SetupUser(userId, "TeamLeader");
@@ -87,11 +87,11 @@ namespace TeamFlow.Tests
                 Id = projectId, 
                 Name = "Test Project", 
                 OrganizationId = 1,
-                TeamLeaderId = userId // User is TL of project
+                TeamLeaderId = userId // Użytkownik jest liderem projektu
             };
             _context.Projects.Add(project);
             
-            // User must be in project
+            // Użytkownik musi być w projekcie
             _context.UserProjects.Add(new UserProject { UserId = userId, ProjectId = projectId, JoinedDate = DateTime.UtcNow });
             
             await _context.SaveChangesAsync();
@@ -105,10 +105,10 @@ namespace TeamFlow.Tests
                 DueDate = DateTime.UtcNow.AddDays(1)
             };
 
-            // Act
+            // Działanie
             var result = await _controller.CreateTask(dto);
 
-            // Assert
+            // Asercja
             var createdResult = Assert.IsType<CreatedAtActionResult>(result);
             var returnDto = Assert.IsType<TaskDto>(createdResult.Value);
             Assert.Equal(dto.Title, returnDto.Title);
@@ -118,10 +118,10 @@ namespace TeamFlow.Tests
         [Fact]
         public async System.Threading.Tasks.Task CreateTask_ReturnsForbidden_WhenUserIsNotAuthorized()
         {
-            // Arrange
+            // Przygotowanie
             var userId = "user2";
             var projectId = 2;
-            SetupUser(userId, "Member"); // Member cannot create tasks usually unless specific logic allows (here logic says NO)
+            SetupUser(userId, "Member"); // Członek zwykle nie może tworzyć zadań (logika to zabrania)
 
             var organization = new Organization { Id = 1, Name = "Test Org", InvitationCode = "INV123" };
             _context.Organizations.Add(organization);
@@ -134,7 +134,7 @@ namespace TeamFlow.Tests
             };
             _context.Projects.Add(project);
             
-            // User is in project but is just a Member
+            // Użytkownik jest w projekcie, ale jest tylko członkiem
             _context.UserProjects.Add(new UserProject { UserId = userId, ProjectId = projectId, JoinedDate = DateTime.UtcNow });
             
             await _context.SaveChangesAsync();
@@ -145,10 +145,10 @@ namespace TeamFlow.Tests
                 ProjectId = projectId
             };
 
-            // Act
+            // Działanie
             var result = await _controller.CreateTask(dto);
 
-            // Assert
+            // Asercja
             Assert.IsType<ObjectResult>(result);
             var objectResult = result as ObjectResult;
             Assert.Equal(StatusCodes.Status403Forbidden, objectResult.StatusCode);
@@ -157,7 +157,7 @@ namespace TeamFlow.Tests
         [Fact]
         public async System.Threading.Tasks.Task UpdateTask_UpdatesStatus_WhenUserIsMemberAndAssigned()
         {
-            // Arrange
+            // Przygotowanie
             var userId = "user3";
             var taskId = 10;
             var projectId = 3;
@@ -180,7 +180,7 @@ namespace TeamFlow.Tests
 
             _context.UserProjects.Add(new UserProject { UserId = userId, ProjectId = projectId, JoinedDate = DateTime.UtcNow });
             
-            // Assign user to task so they can update status
+            // Przypisanie użytkownika do zadania, aby mógł zaktualizować status
             _context.TaskAssignments.Add(new TaskAssignment { TaskId = taskId, UserId = userId, AssignedAt = DateTime.UtcNow });
 
             await _context.SaveChangesAsync();
@@ -190,10 +190,10 @@ namespace TeamFlow.Tests
                 Status = TaskStatus.InProgress
             };
 
-            // Act
+            // Działanie
             var result = await _controller.UpdateTaskStatus(taskId, dto);
 
-            // Assert
+            // Asercja
             var okResult = Assert.IsType<OkObjectResult>(result);
             var returnDto = Assert.IsType<TaskDto>(okResult.Value);
             Assert.Equal(TaskStatus.InProgress, returnDto.Status);

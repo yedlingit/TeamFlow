@@ -5,7 +5,7 @@ namespace TeamFlow.Domain.Entities
 {
     public class TaskAssignment
     {
-        // Composite PK (TaskId + UserId) skonfigurowany w DbContext
+        // Klucz złożony (TaskId + UserId) skonfigurowany w DbContext
         public int TaskId { get; set; }
         public Task Task { get; set; } = null!;
         
