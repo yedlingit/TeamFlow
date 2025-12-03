@@ -97,10 +97,16 @@ using (var scope = app.Services.CreateScope())
     {
         dbContext.Database.Migrate();
         logger.LogInformation("Database migrations applied successfully");
+
+        // Seed Data
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
+        await DbInitializer.InitializeAsync(dbContext, userManager, roleManager);
+        logger.LogInformation("Database seeded successfully");
     }
     catch (Exception ex)
     {
-        logger.LogError(ex, "An error occurred while applying database migrations");
+        logger.LogError(ex, "An error occurred while applying database migrations or seeding data");
     }
 }
 
