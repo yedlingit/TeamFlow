@@ -31,6 +31,7 @@ namespace TeamFlow.Domain.Entities
         public DateTime? DueDate { get; set; }
         
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        public DateTime? UpdatedAt { get; set; }
         
         // Nawigacje many‑to‑many i one‑to‑many
         public ICollection<UserProject> UserProjects { get; set; } = new List<UserProject>();

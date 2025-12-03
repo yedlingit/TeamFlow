@@ -7,8 +7,7 @@
  * - Error handling with retry logic
  * - Request/Response interceptors
  * - TypeScript types
- */
-
+ */  
 // Get API base URL from environment variable (Vite)
 const API_BASE_URL = (import.meta as { env?: { VITE_API_BASE_URL?: string } }).env?.VITE_API_BASE_URL || 'http://localhost:5112';
 
@@ -69,6 +68,22 @@ const isRetryable = (status: number, retryableStatuses: number[]): boolean => {
 /**
  * Main API client function
  */
+import axios from "axios";
+const LOGIN_URL = '/login';
+const login = async () => {
+  try{
+    const res = axios.post(LOGIN_URL, {
+      
+    });
+    return res;
+  }
+
+  catch(err){
+    throw new Error("Login failed");
+  }
+}
+
+
 async function apiClient<T>(
   endpoint: string,
   options: RequestInit = {},
